@@ -636,3 +636,662 @@ functions
 # Step6
 
 再接 LLM。
+
+# II
+
+你现在最应该做的，不是“训练模型”。
+
+而是：
+
+# 先构建 Linux 内核补丁知识库（核心基础设施）
+
+这个比赛真正的主线是：
+
+```text id="dbt6hv"
+Linux commit数据
+    ↓
+结构化
+    ↓
+向量化
+    ↓
+可检索知识库
+    ↓
+AI检索与推理
+```
+
+你可以理解为：
+
+# “先建搜索引擎，再接 AI”
+
+很多人会反过来做，这是错误的。
+
+---
+
+# 一、你应该先完成的核心目标
+
+第一阶段目标：
+
+# “实现：日志 → TopK相关commit”
+
+哪怕：
+
+- 没有 LLM
+- 没有 fancy AI
+- 没有微调
+
+都没关系。
+
+只要：
+
+```text id="p63d64"
+输入崩溃日志
+↓
+输出相关补丁
+```
+
+已经能打很多队。
+
+---
+
+# 二、整个知识库建设路线（非常重要）
+
+建议你按下面顺序做：
+
+---
+
+# Phase 1：采集 Linux commit 数据
+
+---
+
+# 1. 克隆 Linux 仓库
+
+Linux upstream：
+
+The Linux Foundation 内核仓库：
+
+```bash id="y4h1hj"
+git clone https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+```
+
+注意：
+
+# 不要 shallow clone
+
+因为：
+
+你需要：
+
+- 全量 commit
+- commit 历史
+- blame
+- 演化关系
+
+---
+
+# 2. 解析 commit（关键）
+
+这里建议：
+
+# PyDriller（强烈推荐）
+
+安装：
+
+```bash id="eb6pd6"
+pip install pydriller
+```
+
+---
+
+# 三、第一版 commit 数据结构（核心）
+
+你真正要做的是：
+
+# 把 Git commit 变成结构化知识
+
+例如：
+
+```json id="mygwe9"
+{
+  "commit_id": "...",
+  "title": "...",
+  "message": "...",
+  "diff": "...",
+  "files": [],
+  "functions": [],
+  "subsystem": "",
+  "fix_tags": [],
+  "version": "",
+  "timestamp": ""
+}
+```
+
+这是核心。
+
+---
+
+# 四、推荐的 commit 解析代码（非常关键）
+
+建议你直接这样做：
+
+```python id="z5n0g5"
+from pydriller import Repository
+import json
+
+data = []
+
+for commit in Repository("./linux").traverse_commits():
+
+    files = []
+    diffs = []
+
+    for m in commit.modified_files:
+        files.append(m.new_path)
+
+        if m.diff:
+            diffs.append(m.diff[:5000])
+
+    item = {
+        "commit_id": commit.hash,
+        "title": commit.msg.split("\n")[0],
+        "message": commit.msg,
+        "files": files,
+        "diff": "\n".join(diffs),
+        "author": commit.author.name,
+        "date": str(commit.author_date)
+    }
+
+    data.append(item)
+
+with open("linux_commits.json", "w") as f:
+    json.dump(data, f)
+```
+
+---
+
+# 五、为什么 diff 非常重要（比赛关键）
+
+很多人只 embedding commit message。
+
+这是错的。
+
+真正的修复逻辑在：
+
+```diff id="yr2h11"
++ spin_lock()
++ mutex_unlock()
++ refcount_inc()
+```
+
+这些代表：
+
+| diff           | 含义         |
+| -------------- | ------------ |
+| spin_lock      | 并发问题     |
+| kfree_rcu      | RCU/UAF      |
+| refcount_inc   | 生命周期问题 |
+| NULL check     | 空指针       |
+| memory barrier | CPU同步      |
+
+这是：
+
+# “修复语义”
+
+你必须保留。
+
+---
+
+# 六、建立领域知识字段（高分关键）
+
+建议增加：
+
+---
+
+# 1. 子系统识别
+
+根据文件路径：
+
+```text id="f2ayzm"
+net/
+mm/
+fs/
+kernel/
+drivers/
+```
+
+自动分类：
+
+```json id="lkn5od"
+"subsystem": "net"
+```
+
+---
+
+# 2. Bug 类型识别
+
+通过 commit message：
+
+```text id="a6c0wh"
+fix race condition
+use-after-free
+deadlock
+```
+
+提取：
+
+```json id="z6dr4v"
+"bug_type": "race_condition"
+```
+
+---
+
+# 3. 修复模式
+
+从 diff 提取：
+
+```json id="bw69nh"
+{
+  "lock_added": true,
+  "refcount_fix": false,
+  "rcu_fix": true
+}
+```
+
+这是比赛巨大加分项。
+
+---
+
+# 七、真正的知识库结构（推荐）
+
+建议最终存：
+
+```json id="wgbkqf"
+{
+  "commit_id": "",
+  "title": "",
+  "message": "",
+  "diff": "",
+  "subsystem": "",
+  "bug_type": "",
+  "functions": [],
+  "files": [],
+  "embedding_text": ""
+}
+```
+
+---
+
+# 八、embedding_text 怎么构造（关键）
+
+不要直接：
+
+```text id="q6o0cw"
+message + diff
+```
+
+而是：
+
+# “语义增强拼接”
+
+例如：
+
+```python id="9t0krq"
+embedding_text = f"""
+Title:
+{title}
+
+Subsystem:
+{subsystem}
+
+BugType:
+{bug_type}
+
+Files:
+{files}
+
+CommitMessage:
+{message}
+
+CodeDiff:
+{important_diff}
+"""
+```
+
+这样 embedding 效果会好很多。
+
+---
+
+# 九、选择 embedding 模型（非常重要）
+
+推荐：
+
+---
+
+# 第一选择（强烈推荐）
+
+## BGE-M3
+
+优点：
+
+- 中英双语
+- 长文本
+- 检索强
+
+---
+
+# 第二选择
+
+## GTE-Qwen2
+
+很适合代码+文本混合。
+
+---
+
+# 安装
+
+```bash id="5l7qzs"
+pip install sentence-transformers
+```
+
+---
+
+# 十、生成 embedding（核心）
+
+代码：
+
+```python id="sbvczd"
+from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer('BAAI/bge-m3')
+
+embeddings = model.encode(texts, normalize_embeddings=True)
+```
+
+---
+
+# 十一、向量数据库怎么选
+
+---
+
+# 开发阶段
+
+推荐：
+
+# FAISS
+
+简单：
+
+```bash id="0ms2mk"
+pip install faiss-cpu
+```
+
+---
+
+# 比赛正式版
+
+推荐：
+
+# Milvus
+
+因为：
+
+- 支持百万向量
+- 高性能
+- 工业级
+
+---
+
+# 十二、FAISS 第一版（推荐）
+
+你先做：
+
+```python id="1o4azr"
+import faiss
+import numpy as np
+
+index = faiss.IndexFlatIP(1024)
+
+index.add(embeddings)
+
+D, I = index.search(query_embedding, 10)
+```
+
+先跑通。
+
+---
+
+# 十三、日志检索流程（最关键）
+
+最终：
+
+---
+
+# 输入
+
+```text id="6nbm3t"
+BUG: soft lockup
+list_del corruption
+```
+
+---
+
+# Step1：Root Cause 抽象
+
+得到：
+
+```text id="i9fdsa"
+race condition in linked list operation
+```
+
+---
+
+# Step2：Embedding
+
+---
+
+# Step3：向量检索
+
+得到：
+
+```text id="eq5ux9"
+Top100 commits
+```
+
+---
+
+# Step4：Reranker（非常关键）
+
+排序：
+
+```text id="sw70b7"
+真正相关的commit
+```
+
+---
+
+# 十四、Reranker 才是比赛核心
+
+embedding 只能：
+
+# “召回”
+
+真正：
+
+# “判断相关性”
+
+靠 reranker。
+
+---
+
+# 推荐：
+
+## bge-reranker-v2
+
+输入：
+
+```text id="8b8cn7"
+(query, commit)
+```
+
+输出：
+
+```text id="nnvjlwm"
+相关性分数
+```
+
+---
+
+# 十五、训练数据从哪里来（重点）
+
+你后面如果想微调。
+
+最好的数据：
+
+# stable patch
+
+Linux 很多 commit：
+
+```text id="2cc9hy"
+Fixes:
+Cc: stable
+```
+
+天然就是：
+
+# “bug -> fix”
+
+监督数据。
+
+---
+
+# 十六、真正高分队伍会做什么
+
+不是：
+
+```text id="6ud78g"
+普通向量检索
+```
+
+而是：
+
+# “内核领域知识增强检索”
+
+例如：
+
+---
+
+# 1. 调用栈解析
+
+```text id="vd57qc"
+mutex_lock
+schedule_timeout
+```
+
+推断：
+
+```text id="p07n13"
+deadlock
+```
+
+---
+
+# 2. diff语义理解
+
+```diff id="pp4l1y"
++ spin_lock_irqsave
+```
+
+推断：
+
+```text id="rsmgbr"
+修复竞态
+```
+
+---
+
+# 3. 子系统演化
+
+```text id="r9j98m"
+net/core/dev.c
+```
+
+和：
+
+```text id="mgjlwm"
+napi_poll
+```
+
+关联。
+
+---
+
+# 十七、你现在最应该做的路线（非常具体）
+
+建议：
+
+---
+
+# 第1周
+
+## 完成：
+
+- Linux commit 抽取
+- JSON化
+- embedding
+- FAISS
+
+实现：
+
+```text id="6s0mau"
+日志 -> Top10 commits
+```
+
+---
+
+# 第2周
+
+增加：
+
+- subsystem
+- bug type
+- diff parsing
+
+---
+
+# 第3周
+
+增加：
+
+- reranker
+- root cause抽象
+
+---
+
+# 第4周
+
+增加：
+
+- drgn
+- vmcore解析
+
+---
+
+# 十八、你真正的技术壁垒是什么
+
+不是：
+
+# “训练大模型”
+
+而是：
+
+# “Linux Kernel Knowledge Engineering”
+
+包括：
+
+- bug pattern
+- locking semantics
+- RCU
+- scheduler
+- slab
+- patch semantics
+
+这才是比赛真正拉开差距的地方。

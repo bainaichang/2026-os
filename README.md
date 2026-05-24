@@ -112,8 +112,5 @@ sudo apt-get install crash
 # 安装drgn - 安装文件很大，有8G大小!
 sudo pip3 install drgn
 sudo apt install ubuntu-dbgsym-keyring
-sudo tee /etc/apt/sources.list.d/ddebs.list <<EOF\ndeb http://ddebs.ubuntu.com $(lsb_release -cs) main restricted universe multiverse\ndeb http://ddebs.ubuntu.com $(lsb_release -cs)-updates main restricted universe multiverse\ndeb http://ddebs.ubuntu.com $(lsb_release -cs)-proposed main restricted universe multiverse\nEOF
-sudo apt update
-sudo apt install linux-image-$(uname -r)-dbgsym
-sudo apt install linux-image-unsigned-$(uname -r)-dbgsym
+http://ddebs.ubuntu.com/pool/main/l/linux-hwe-6.8/
 ```
